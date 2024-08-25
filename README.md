@@ -239,3 +239,184 @@ Access Token이 만료되어 Refresh Token을 가지고 서버 특정 엔드포�
 서버측 JWTFilter 에서 Access Token 의 만료로 인한 특정한 상태 코드가 응답되면 프론트측 Axios Interceptor와 같은 예외 핸들러에서 Access 토큰 재발급을 위한 Refresh 를 서버측으로 전송한다.
 
 이때 서버에서는 Refresh Token 을 받아 새로운 Access Token 을 응답하는 코드를 작성하면 된다.
+
+
+---
+
+
+## Spring Security 내부 구조 중 SecurityContextHolder
+
+### SecurityFilterChain filter별 작업 상태 저장
+
++ **상태 저장 필요**
+
+![image](https://github.com/user-attachments/assets/9fd03b18-d975-4c8a-a225-27cd765e0c06)
+
+SecurityFilterChain 내부에 존재하는 각각의 filter가 security 관련 작업을 진행한다.
+
+모든 작업은 기능 단위로 분업하여 진행함으로 앞에서 한 작업을 *뒤 filter* 가 알기 위한 저장소 개념이 필요하다.
+
+<br>
+
+예를 들어, 인가 filter 가 작업을 하려면 User 의 ROLE 정보가 필요한데, **`앞단의 filter 에서 user 에게 ROLE 값을 부여한 결과`** 를 *인가 filter 까지 공유해야* 확인할 수 있다.
+
+<br>
+
++ **저장 : Authentication 객체**
+
+![image](https://github.com/user-attachments/assets/eec97ef7-5a0a-49a7-a3a1-017420615d33)
+
+해당하는 정보가 Authentication 이라는 객체에 담긴다.
+
+(이 객체에 id, login 여부, ROLE 데이터가 담긴다.)
+
+Authentication 객체는 SecurityContext 에 포함되어 관리되며 *SecurityContext 는 0개 이상 존재* 할 수 있다.
+
+그리고 이 `N개의 SecurityContext` 는 **하나의 SecurityContextHolder** 에 의해서 관리된다.
+
+<br>
+
+  + **Authentication 객체**
+
+    + Principal : User 에 대한 정보
+   
+    + Credentials : 증명 (Password, Token)
+   
+    + Authorities : User 의 권한(ROLE) 목록
+
+<br>
+
+  + **접근**
+
+    ```java
+    SecurityContextHolder.getContext().getAuthentication().getAuthorities();
+    ```
+
+    SecurityContextHolder 의 method 는 static 으로 선언되기 때문에 어디서든 접근할 수 있다.
+
+<br>
+
+  + **SecurityContextHolder**
+
+    ```java
+    public class SecurityContextHolder {
+
+    }
+    ```
+
+<br>
+
+  + **특이 사항**
+
+    다수의 사용자인 Multi thread 환경에서 SecurityContextHolder 를 통해 SecurityContext 를 부여하는 관리 전략은 ***위임하여 다른 class 에게 맡긴다.***
+
+    (사용자별로 다른 저장소를 제공해야 인증 정보가 겹치치 일이 발생하지 않는다.)
+
+    즉, SecurityContextHolder 는 SecurityContext 들을 관리하는 method 들을 제공하지만 실제로 등록, 초기화, 읽기와 같은 작업은 **`SecurityContextHolderStrategy interface`** 를 활용한다.
+
+<br>
+
+  + **SecurityContextHolderStrategy 구현 종류**
+
+    ```java
+    private static void initializeStrategy() {
+
+	      if (MODE_PRE_INITIALIZED.equals(strategyName)) {
+		        Assert.state(strategy != null, "When using " + MODE_PRE_INITIALIZED
+				        + ", setContextHolderStrategy must be called with the fully constructed strategy");
+		        return;
+	      }
+	      if (!StringUtils.hasText(strategyName)) {
+		      // Set default
+		      strategyName = MODE_THREADLOCAL;
+	      }
+	      if (strategyName.equals(MODE_THREADLOCAL)) {
+		      strategy = new ThreadLocalSecurityContextHolderStrategy();
+		      return;
+	      }
+	      if (strategyName.equals(MODE_INHERITABLETHREADLOCAL)) {
+		      strategy = new InheritableThreadLocalSecurityContextHolderStrategy();
+		      return;
+	      }
+	      if (strategyName.equals(MODE_GLOBAL)) {
+		      strategy = new GlobalSecurityContextHolderStrategy();
+		      return;
+	      }
+	      // Try to load a custom strategy
+	      try {
+		        Class<?> clazz = Class.forName(strategyName);
+		        Constructor<?> customStrategy = clazz.getConstructor();
+		        strategy = (SecurityContextHolderStrategy) customStrategy.newInstance();
+	       }
+	      catch (Exception ex) {
+		        ReflectionUtils.handleReflectionException(ex);
+	       }
+      }
+    ```
+
+<br>
+
+기본적으로 **`threadlocal`** 방식을 사용한다. 
+
+<br>
+
+
+### ThreadLocal 방식에서 SecurityContext
+
++ **ThreadLocalSecurityContextHolderStrategy**
+
+  ```java
+  final class ThreadLocalSecurityContextHolderStrategy implements SecurityContextHolderStrategy {
+
+	  private static final ThreadLocal<Supplier<SecurityContext>> contextHolder = new ThreadLocal<>();
+
+  }
+  ```
+
+<br>
+
++ **접근 thread 별 SecurityContext 배분**
+
+  `Tomcat WAS` 는 Multi thread 방식으로 동작한다.
+
+  User 가 접속하면 *user 에게 하나의 thread* 를 할당한다.
+
+  각각의 user 는 **동시에 Security login logic** 을 사용할 수 있다.
+
+<br>
+
+  이때 SecurityContextHolder 의 필드에 선언된 SecurityContext 를 호출하게 된다면 thread 간 공유하는 memory 의 code 영역에 데이터가 있기 때문에 정보가 덮어지는 현상이 발생한다고 생각할 수 있는데,
+
+  **threadLocal 로 관리되기 때문에 thread 별로 다른 구획을 나눠 제공한다.**
+
+![image](https://github.com/user-attachments/assets/8989f995-f9f0-4498-9ef1-4f4df316f658)
+
+<br>
+
+### 요약
+
++ SecurityFilterChain 의 각각의 filter 에서 수행한 작업 내용이 전달되기 위해 요청(user) 별로 Authentication 객체를 할당하여 확인함.
+
++ Authentication 객체는 SecurityContextHolder 의 SecurityContext 가 관리함.
+
++ Multi thread 환경에서 SecurityContext 를 만들고 필드의 static 영역에 선언된 SecurityContext 를 다루는 전략은 기본적으로 thraedLocal 전략을 이용함.
+
+<br>
+
+***어디에서 사용하는가 ?***
+
++ `Logout Filter` : logout 로직을 수행하면서 SecurityContext 의 Authentication 객체를 비움
+
++ `Login Filter` : 인증을 완료한 뒤 User 정보를 담은 Authentication 객채를 넣음
+
+<br>
+
+***추가***
+
++ **SecurityContextHolder 는 왜 Bean 이 아닌 static 으로 등록할까 ?**
+
+  Util class 의 경우 static 으로 선언하는게 암묵적인 rule.
+
++ **Thread safe 한 함수의 local 변수 대신 왜 field 변수를 사용하고 threadLocal 을 사용하는지?**
+
+  Thread 단위로 기억을 하는 경우는 field 변수를 사용함.
