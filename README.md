@@ -461,3 +461,12 @@ Authentication 객체는 SecurityContext 에 포함되어 관리되며 *Security
 + **Thread safe 한 함수의 local 변수 대신 왜 field 변수를 사용하고 threadLocal 을 사용하는지?**
 
   Thread 단위로 기억을 하는 경우는 field 변수를 사용함.
+
+
+<br>
+
+---
+
+
+
+[고민했던 부분에 대한 좋은 issue article] [https://github.com/boojongmin/memo/issues/7]
