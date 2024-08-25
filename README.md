@@ -18,6 +18,15 @@ Spring Security 는 클라이언트의 요청이 여러개의 filter 를 거쳐 
 
   ![image](https://github.com/user-attachments/assets/88e92e0d-dcfd-4e34-9567-4c98c8720c2e)
 
+  > + ***DelegatingFilterProxy FilterChainProxy 모식도***
+  >   
+  > ![image](https://github.com/user-attachments/assets/87e40ac9-518d-431b-946e-c29ea10c06d3)
+  
+  > + ***FilterChainProxy***
+  > 
+  > ![image](https://github.com/user-attachments/assets/797c6b7c-be05-4851-9df5-de1f0deed667)
+  
+
 <br>
 
 + **Servlet FilterChain 의 DelegatingFilter → SecurityFilterChain (내부 처리 후) → Servlet FilterChain 의 DelegatingFilter**
