@@ -4,7 +4,7 @@
 
 ## Spring Security Filter 동작 원리
 
-Spring Security 는 클라이언트의 요청이 여러개의 filter 를 거쳐 DispatcherServlet(Controller)으로 향하는 중간 filter 에서 요청을 가로챈 후 검증(인증/인가)을 진행한다.
+Spring Security 는 클라이언트의 요청이 여러개의 filter 를 거쳐 ***DispatcherServlet(Controller)으로 향하는 중간 filter*** 에서 요청을 가로챈 후 검증(인증/인가)을 진행한다.
 
 + **클라이언트 요청 → Servlet Filter → Servlet (Controller)**
 
@@ -14,7 +14,7 @@ Spring Security 는 클라이언트의 요청이 여러개의 filter 를 거쳐 
 
 + **Delegating Filter Proxy**
 
-  Servlet Container (Tomcat) 에 존재하는 FilterChain 에 DelegatingFilter 를 등록한 뒤 모든 요청을 가로챈다.
+  **`Servlet Container (Tomcat)`** 에 존재하는 FilterChain 에 DelegatingFilter 를 등록한 뒤 모든 요청을 가로챈다.
 
   ![image](https://github.com/user-attachments/assets/88e92e0d-dcfd-4e34-9567-4c98c8720c2e)
 
@@ -31,7 +31,7 @@ Spring Security 는 클라이언트의 요청이 여러개의 filter 를 거쳐 
 
 + **Servlet FilterChain 의 DelegatingFilter → SecurityFilterChain (내부 처리 후) → Servlet FilterChain 의 DelegatingFilter**
 
-  가로챈 요청은 SecurityFilterChain에서 처리 후 상황에 따른 거부, 리디렉션, 서블릿으로 요청 전달을 진행한다.
+  가로챈 요청은 SecurityFilterChain에서 처리 후 상황에 따른 거부, 리디렉션, servlet 으로 요청 전달을 진행한다.
 
   ![image](https://github.com/user-attachments/assets/8ab9f830-d7af-47b8-a7dc-c1e2a8c397fa)
 
@@ -48,14 +48,55 @@ Spring Security 는 클라이언트의 요청이 여러개의 filter 를 거쳐 
 
 Form 로그인 방식에서는 클라이언트단이 username과 password를 전송한 뒤 SecurityFilter 를 통과하는데 **`UsernamePasswordAuthentication Filter`** 에서 회원 검증을 진행을 시작한다.
 
+> 이 filter 가 등록되는 목적은 `POST : “/login”` 경로에서 Form 기반 인증을 진행할 수 있도록 multipart/form-data 형태의 username/password 데이터를 받아 ***인증 클래스에게 값을 넘겨주는 역할을 수행한다.***
+
 (회원 검증의 경우 ***UsernamePasswordAuthenticationFilter가 호출한 AuthenticationManager*** 를 통해 진행하며 **DB에서 조회한 데이터를 UserDetailsService** 를 통해 받음)
 
 우리의 JWT 프로젝트는 SecurityConfig 에서 formLogin 방식을 `disable` 했기 때문에 기본적으로 활성화 되어 있는 해당 필터는 동작하지 않는다.
+
+![image](https://github.com/user-attachments/assets/11664e06-0c26-4a25-bd45-02ceb94070f2)
 
 따라서 로그인을 진행하기 위해서 필터를 custom 하여 등록해야 한다.
 
 <br>
 
+
+### UsernamePasswordAuthenticationFilter에서 attemptAuthentication() 메소드
+
+```java
+@Override
+public Authentication attemptAuthentication(HttpServletRequest request, HttpServletResponse response) throws AuthenticationException {
+		
+	// 로그인 경로 요청인지 확인
+	if (this.postOnly && !request.getMethod().equals("POST")) {
+		throw new AuthenticationServiceException("Authentication method not supported: " + request.getMethod());
+	}
+	
+	// 요청으로부터 multipart/form-data로 전송되는 username, password 획득
+	String username = obtainUsername(request);
+	username = (username != null) ? username.trim() : "";
+	String password = obtainPassword(request);
+	password = (password != null) ? password : "";
+	
+	// 인증을 위해 위 데이터를 인증 토큰에 넣음
+	UsernamePasswordAuthenticationToken authRequest = UsernamePasswordAuthenticationToken.unauthenticated(username, password);
+
+	// Allow subclasses to set the "details" property
+	setDetails(request, authRequest);
+	
+	// username/password 기반 인증을 진행하는 AuthenticationManager에게 인증을 요청 후 응답
+	return this.getAuthenticationManager().authenticate(authRequest);
+}
+```
+
+위 **`attemptAuthentication 메소드에서 user 가 보낸 정보`** 를 받아 **AuthenticationManager** 에게 넘기는데 해당 class 들은 어떻게 구성되어 있고 어떤 과정을 거쳐서 로그인이 수행될까?
+
+username/password 기반으로 국한되어 살펴보면 아래와 같다.
+
+![image](https://github.com/user-attachments/assets/94ba49d7-34ff-4547-804e-c9d466d4fea4)
+
+
+<br>
 
 ## 1. Token 사용 추적
 
@@ -126,7 +167,7 @@ Access Token이 만료되었다는 요청이 돌아왔을 경우 프론트엔드
  
 + 프론트측 API 클라이언트 (axios, fetch) 요청시 Access Token 만료 요청이 오면 예외문을 통해 Refresh Token을 서버측으로 전송하고 Access Token을 발급 받는 로직을 수행한다. (기존 Access는 제거)
  
-+ 서버측에서는 Refresh Token을 받을 엔드포인트 (컨트롤러)를 구성하여 Refresh를 검증하고 Access를 응답한다.
++ 서버측에서는 Refresh Token을 받을 endpoint(Controller) 를 구성하여 Refresh를 검증하고 Access를 응답한다.
  
 <br>
 
@@ -143,7 +184,7 @@ Access Token이 만료되었다는 요청이 돌아왔을 경우 프론트엔드
 
 + **Access/Refresh Token의 저장 위치 고려**
 
-로컬/세션 스토리지 및 쿠키에 따라 XSS, CSRF 공격의 여부가 결정되기 때문에 각 Token 사용처에 알맞은 저장소 설정.
+Local/Session Storage 및 Cookie 에 따라 XSS, CSRF 공격의 여부가 결정되기 때문에 각 Token 사용처에 알맞은 저장소 설정.
 
 + **Refresh Token Rotate**
 
@@ -153,7 +194,7 @@ Access Token을 갱신하기 위한 Refresh Token 요청 시 서버측에서에�
 
 ## 5. Access/Refresh Token 저장 위치
 
-클라이언트에서 발급 받은 JWT를 저장하기 위해 로컬 스토리지와 쿠키에 대해 많은 고려를 한다. 각 스토리지에 따른 특징과 취약점은 아래와 같다.
+클라이언트에서 발급 받은 JWT를 저장하기 위해 Local Storage 와 Cookie 에 대해 많은 고려를 한다. 각 storage 에 따른 특징과 취약점은 아래와 같다.
 
 <br>
 
@@ -167,15 +208,15 @@ Access Token을 갱신하기 위한 Refresh Token 요청 시 서버측에서에�
 
 + **고려**
   
-  JWT의 탈취는 보통 XSS 공격으로 로컬 스토리지에 저장된 JWT를 가져갑니다.
+  JWT 의 탈취는 보통 `XSS 공격` 으로 **Local storage 에 저장된 JWT** 를 가져갑니다.
 
-  그럼 쿠키 방식으로 저장하면 안전하지 않을까라는 의문이 들지만, 쿠키 방식은 CSRF 공격에 취약합니다. 그럼 각 상황에 알맞게 저장소를 선택합시다.
+  그럼 Cookie 방식으로 저장하면 안전하지 않을까라는 의문이 들지만, *Cookie 방식은 CSRF 공격에 취약합니다.* 그럼 각 상황에 알맞게 저장소를 선택합시다.
 
 <br> 
 
 + **Access Token**
 
-  Access Token은 주로 로컬 스토리지에 저장됩니다.
+  Access Token은 주로 Local storage 에 저장됩니다.
 
   짧은 생명 주기로 탈취에서 사용까지 기간이 매우 짧고, 에디터 및 업로더에서 XSS를 방어하는 로직을 작성하여 최대한 보호 할 수 있지만 CSRF 공격의 경우 클릭 한 번으로 단시간에 요청이 진행되기 때문입니다.
 
@@ -185,25 +226,25 @@ Access Token을 갱신하기 위한 Refresh Token 요청 시 서버측에서에�
 
 + **Refresh Token**
   
-  Refresh Token은 주로 쿠키에 저장됩니다.
+  Refresh Token은 주로 Cookie 에 저장됩니다.
 
-  쿠키는 XSS 공격을 받을 수 있지만 httpOnly를 설정하면 완벽히 방어할 수 있습니다.
+  Cookie 는 XSS 공격을 받을 수 있지만 **`httpOnly`** 를 설정하면 완벽히 방어할 수 있습니다.
 
   그럼 가장 중요한 CSRF 공격에 대해 위험하지 않을까라는 의구심이 생깁니다.
 
-  하지만 Refresh Token의 사용처는 단 하나인 Token 재발급 경로입니다.
+  하지만 Refresh Token의 사용처는 *단 하나인 Token 재발급 경로입니다.*
 
-  CSRF는 Access Token이 접근하는 회원 정보 수정, 게시글 CRUD에 취약하지만 Token 재발급 경로에서는 크게 피해를 입힐 만한 로직이 없기 때문입니다.
+  CSRF 는 Access Token이 접근하는 회원 정보 수정, 게시글 CRUD 에 취약하지만 Token 재발급 경로에서는 크게 피해를 입힐 만한 로직이 없기 때문입니다.
 
 <br>
 
 ## 6. Refresh Token Rotate
 
-위와 같이 저장소의 특징에 알맞은 JWT 보호 방법을 수행해도 탈취 당할 수 있는게 웹 세상입니다. 
+위와 같이 저장소의 특징에 알맞은 JWT 보호 방법을 수행해도 탈취 당할 수 있는게 Web 세상입니다. 
 
-따라서 생명주기가 긴 Refresh Token에 대한 추가적인 방어 조치가 있습니다.
+따라서 생명주기가 긴 Refresh Token 에 대한 추가적인 방어 조치가 있습니다.
 
-Access Token이 만료되어 Refresh Token을 가지고 서버 특정 엔드포인트에 재발급을 진행하면 Refresh Token 또한 재발급하여 프론트측으로 응답하는 방식이 Refresh Rotate 입니다.
+Access Token 이 만료되어 Refresh Token 을 가지고 서버 특정 엔드포인트에 재발급을 진행하면 Refresh Token 또한 재발급하여 프론트측으로 응답하는 방식이 **Refresh Rotate** 입니다.
 
 <br> 
 
@@ -211,34 +252,34 @@ Access Token이 만료되어 Refresh Token을 가지고 서버 특정 엔드포�
 
 + **문제**
   
-  로그아웃을 구현하면 프론트측에 존재하는 Access/Refresh Token을 제거합니다.
+  Logout 을 구현하면 프론트측에 존재하는 Access/Refresh Token 을 제거합니다.
 
-  그럼 프론트측에서 요청을 보낼 JWT가 없기 때문에 로그아웃이 되었다고 생각하지만 이미 해커가 JWT를 복제 했다면 요청이 수행됩니다.
+  그럼 프론트측에서 요청을 보낼 JWT 가 없기 때문에 logout 이 되었다고 생각하지만 이미 해커가 JWT 를 복제 했다면 요청이 수행됩니다.
 
-  위와 같은 문제가 존재하는 이유는 단순하게 JWT를 발급해준 순간 서버측의 주도권은 없기 때문입니다.
+  위와 같은 문제가 존재하는 이유는 단순하게 JWT 를 발급해준 순간 server 측의 주도권은 없기 때문입니다.
 
-  (세션 방식은 상태를 STATE하게 관리하기 때문에 주도권이 서버측에 있음)
+  (세션 방식은 상태를 STATE하게 관리하기 때문에 주도권이 server 측에 있음)
 
-   로그아웃 케이스뿐만 아니라 JWT가 탈취되었을 경우 서버 측 주도권이 없기 때문에 피해를 막을 방법은 생명주기가 끝이나 길 기다리는 방법입니다.
+   Logout 케이스뿐만 아니라 JWT 가 탈취되었을 경우 server 측 주도권이 없기 때문에 피해를 막을 방법은 생명주기가 끝이나 길 기다리는 방법입니다.
 
 <br>
 
 + **방어 방법**
   
-  위 문제의 해결법은 생명주기가 긴 Refresh Token은 발급과 함께 서버측 저장소에도 저장하여 요청이 올때마다 저장소에 존재하는지 확인하는 방법으로 서버측에서 주도권을 가질 수 있습니다.
+  위 문제의 해결법은 생명주기가 긴 Refresh Token은 발급과 함께 server측 저장소에도 저장하여 요청이 올때마다 저장소에 존재하는지 확인하는 방법으로 server측에서 주도권을 가질 수 있습니다.
 
-  만약 로그아웃을 진행하거나 탈취에 의해 피해가 진행되는 경우 서버측 저장소에서 해당 JWT를 삭제하여 피해를 방어할 수 있습니다.
+  만약 logout 을 진행하거나 탈취에 의해 피해가 진행되는 경우 server측 저장소에서 해당 JWT 를 삭제하여 피해를 방어할 수 있습니다.
 
-  (Refresh Token 블랙리스팅이라고도 부릅니다.)
+  (Refresh Token Blacklisting 이라고도 부릅니다.)
 
 <br>
 
 
 ![image](https://github.com/user-attachments/assets/19bd9f6a-8041-4263-a10d-46d68a290add)
 
-서버측 JWTFilter 에서 Access Token 의 만료로 인한 특정한 상태 코드가 응답되면 프론트측 Axios Interceptor와 같은 예외 핸들러에서 Access 토큰 재발급을 위한 Refresh 를 서버측으로 전송한다.
+Server측 JWTFilter 에서 Access Token 의 만료로 인한 특정한 상태 코드가 응답되면 프론트측 Axios Interceptor 와 같은 예외 핸들러에서 Access token 재발급을 위한 Refresh 를 server 측으로 전송한다.
 
-이때 서버에서는 Refresh Token 을 받아 새로운 Access Token 을 응답하는 코드를 작성하면 된다.
+이때 Server 에서는 Refresh Token 을 받아 새로운 Access Token 을 응답하는 코드를 작성하면 된다.
 
 
 ---
